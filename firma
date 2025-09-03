@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Firmar PDF con PNG</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js"></script>
+  <style>
+    body { font-family: sans-serif; text-align: center; }
+    canvas { border: 1px solid #ccc; margin: 10px 0; }
+    #firmaPreview {
+      position: absolute;
+      cursor: move;
+      max-width: 200px;
+      max-height: 100px;
+      display: none;
+    }
+    #pdfContainer { position: relative; display: inline-block; }
+  </style>
+</head>
+<body>
+  <h2>Firmar PDF con una firma en PNG</h2>
+  <input type="file" id="pdfFile" accept="application/pdf"><br><br>
+  <input type="file" id="firmaFile" accept="image/png"><br><br>
+  <button id="guardarBtn">Descargar PDF firmado</button>
+
+  <div id="pdfContainer">
+    <canvas id="pdfCanvas"></canvas>
+    <img id="firmaPreview" draggable="true">
+  </div>
+
+  <script>
+    let pdfDoc = null;
+    let firmaImg = null;
+    let firmaX = 50, firmaY = 50;
+    let scale = 1.0;
+
+    const canvas = document.getElementById("pdfCanvas");
+    const ctx = canvas.getContext("2d");
+    const firmaPreview = document.getElementById("firmaPreview");
+
+    // Cargar PDF
+    document.getElementById("pdfFile").addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      const fileReader = new FileReader();
+      fileReader.onload = async function() {
+        const typedarray = new Uint8Array(this.result);
+        pdfDoc = await pdfjsLib.getDocument(typedarray).promise;
+        const page = await pdfDoc.getPage(1);
+        const viewport = page.getViewport({ scale: 1.5 });
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const renderContext = { canvasContext: ctx, viewport: viewport };
+        page.render(renderContext);
+      };
+      fileReader.readAsArrayBuffer(file);
+    });
+
+    // Cargar firma en PNG
+    document.getElementById("firmaFile").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      const reader = new FileReader();
+      reader.onload = function(ev) {
+        firmaPreview.src = ev.target.result;
+        firmaPreview.style.display = "block";
+        firmaPreview.style.left = firmaX + "px";
+        firmaPreview.style.top = firmaY + "px";
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // Arrastrar la firma
+    firmaPreview.addEventListener("mousedown", (e) => {
+      let offsetX = e.clientX - firmaPreview.offsetLeft;
+      let offsetY = e.clientY - firmaPreview.offsetTop;
+
+      function mover(ev) {
+        firmaPreview.style.left = (ev.clientX - offsetX) + "px";
+        firmaPreview.style.top = (ev.clientY - offsetY) + "px";
+      }
+
+      function soltar() {
+        firmaX = parseInt(firmaPreview.style.left);
+        firmaY = parseInt(firmaPreview.style.top);
+        document.removeEventListener("mousemove", mover);
+        document.removeEventListener("mouseup", soltar);
+      }
+
+      document.addEventListener("mousemove", mover);
+      document.addEventListener("mouseup", soltar);
+    });
+
+    // Guardar PDF firmado
+    document.getElementById("guardarBtn").addEventListener("click", async () => {
+      if (!pdfDoc || !firmaPreview.src) {
+        alert("Debes cargar un PDF y una firma primero.");
+        return;
+      }
+
+      const existingPdfBytes = await fetch(URL.createObjectURL(document.getElementById("pdfFile").files[0])).then(r => r.arrayBuffer());
+      const pdfDocLib = await PDFLib.PDFDocument.load(existingPdfBytes);
+
+      const firmaBytes = await fetch(firmaPreview.src).then(r => r.arrayBuffer());
+      const firmaImage = await pdfDocLib.embedPng(firmaBytes);
+
+      const page = pdfDocLib.getPage(0); // Página 1
+      const { width, height } = page.getSize();
+
+      // Convertir coordenadas de HTML a PDF
+      const firmaWidth = 150;
+      const firmaHeight = 60;
+      const posX = firmaX;
+      const posY = height - firmaY - firmaHeight;
+
+      page.drawImage(firmaImage, {
+        x: posX,
+        y: posY,
+        width: firmaWidth,
+        height: firmaHeight,
+      });
+
+      const pdfBytes = await pdfDocLib.save();
+      const blob = new Blob([pdfBytes], { type: "application/pdf" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = "pdf_firmado.pdf";
+      link.click();
+    });
+  </script>
+</body>
+</html>
